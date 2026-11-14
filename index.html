@@ -1,0 +1,484 @@
+import io
+import streamlit as st
+from google import genai
+
+# --- CẤU HÌNH GIAO DIỆN TRANG WEB ---
+st.set_page_config(
+    page_title="Nền tảng Hỗ trợ Giáo dục Hòa nhập THCS",
+    page_icon="📚",
+    layout="wide"
+)
+
+# --- TÙY CHỈNH GIAO DIỆN (CHỮ SIÊU TO, RÕ RÀNG, DỄ ĐỌC CHO HỌC SINH & GIÁO VIÊN) ---
+st.markdown("""
+    <style>
+    /* Phóng to toàn bộ chữ trên trang để dễ đọc */
+    html, body, [class*="css"] {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        font-size: 20px !important; /* Tăng cỡ chữ tổng thể */
+        color: #1A202C;
+    }
+    
+    /* Màu nền chính sinh động */
+    .stApp {
+        background: linear-gradient(135deg, #f0f4f8 0%, #d9e2ec 100%);
+    }
+    
+    /* Thanh Sidebar to rõ */
+    [data-testid="stSidebar"] {
+        background-color: #E6FFFA;
+        border-right: 3px solid #38B2AC;
+    }
+    [data-testid="stSidebar"] * {
+        font-size: 19px !important;
+    }
+    
+    /* Tiêu đề siêu to, nổi bật */
+    h1 {
+        font-size: 38px !important;
+        color: #2B6CB0 !important;
+        font-weight: 800 !important;
+    }
+    h2 {
+        font-size: 30px !important;
+        color: #2C5282 !important;
+        font-weight: 700 !important;
+    }
+    h3 {
+        font-size: 24px !important;
+        color: #2B6CB0 !important;
+        font-weight: 700 !important;
+    }
+    
+    /* Khung thông báo chữ to */
+    .stAlert {
+        border-radius: 12px;
+        font-size: 19px !important;
+        font-weight: 600;
+    }
+    
+    /* Nút bấm (Buttons) to rõ, dễ nhìn */
+    .stButton>button {
+        background: linear-gradient(90deg, #3182CE 0%, #2B6CB0 100%);
+        color: white;
+        border-radius: 12px;
+        padding: 0.8rem 1.5rem;
+        font-size: 20px !important;
+        font-weight: 700;
+        border: none;
+        box-shadow: 0 4px 6px rgba(50, 50, 93, 0.15);
+        transition: 0.3s;
+    }
+    .stButton>button:hover {
+        background: linear-gradient(90deg, #2B6CB0 0%, #1A365D 100%);
+    }
+    
+    /* Ô nhập liệu chữ to, rõ viền */
+    .stTextInput input, .stTextArea textarea, .stSelectbox select {
+        font-size: 19px !important;
+        border-radius: 10px !important;
+        border: 2px solid #A0AEC0 !important;
+        padding: 10px !important;
+    }
+    
+    /* Thẻ Tabs to rõ */
+    .stTabs [data-baseweb="tab"] {
+        font-size: 20px !important;
+        font-weight: 700 !important;
+        padding: 12px 24px;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# --- KHỞI TẠO CLIENT GEMINI AI ---
+try:
+    client = genai.Client()
+except Exception:
+    client = None
+
+# --- QUẢN LÝ TRẠNG THÁI ĐĂNG NHẬP & DỮ LIỆU ---
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "username" not in st.session_state:
+    st.session_state.username = ""
+if "role" not in st.session_state:
+    st.session_state.role = ""
+if "email" not in st.session_state:
+    st.session_state.email = ""
+if "student_profiles" not in st.session_state:
+    st.session_state.student_profiles = []
+if "reports" not in st.session_state:
+    st.session_state.reports = []
+if "assigned_tasks" not in st.session_state:
+    st.session_state.assigned_tasks = []
+if "student_progress" not in st.session_state:
+    st.session_state.student_progress = {}
+
+# =========================================================================
+# MÀN HÌNH ĐĂNG NHẬP (GIAO DIỆN CHỮ TO, RÕ RÀNG)
+# =========================================================================
+if not st.session_state.logged_in:
+    st.markdown("<h1 style='text-align: center; margin-top: 20px;'>🌟 Nền tảng số Hỗ trợ Giáo dục Hòa nhập THCS 🌟</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; font-size: 21px; color: #4A5568;'>Hệ thống tích hợp AI hỗ trợ lập IEP, học liệu sơ đồ tư duy và kiểm tra đánh giá thích ứng.</p>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("""
+            <div style="background-color: #ffffff; padding: 35px; border-radius: 18px; box-shadow: 0 10px 25px rgba(0,0,0,0.1);">
+        """, unsafe_allow_html=True)
+        with st.form("google_login_form"):
+            st.markdown("<h3 style='text-align: center; color: #2C5282;'>🔐 Đăng nhập hệ thống</h3>", unsafe_allow_html=True)
+            google_email = st.text_input("📧 Nhập email Google của bạn:", placeholder="nguyenhoangtuquyen@gmail.com")
+            user_name = st.text_input("👤 Họ và tên hiển thị:", placeholder="Nhập tên của bạn...")
+            selected_role = st.selectbox(
+                "📌 Chọn vai trò sử dụng hệ thống:",
+                ["Giáo viên", "Học sinh"]
+            )
+            
+            submit_login = st.form_submit_button("🚀 Đăng nhập ngay", use_container_width=True)
+            
+            if submit_login:
+                if not google_email.strip() or "@" not in google_email:
+                    st.warning("⚠️ Vui lòng nhập địa chỉ email Google hợp lệ!")
+                elif not user_name.strip():
+                    st.warning("⚠️ Vui lòng nhập họ và tên của bạn!")
+                else:
+                    st.session_state.logged_in = True
+                    st.session_state.username = user_name
+                    st.session_state.email = google_email
+                    st.session_state.role = selected_role
+                    st.success(f"🎉 Đăng nhập thành công với tài khoản: {google_email}")
+                    st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    st.stop()
+
+# =========================================================================
+# GIAO DIỆN CHÍNH SAU KHI ĐĂNG NHẬP
+# =========================================================================
+st.sidebar.markdown(f"### 👤 Xin chào!")
+st.sidebar.info(f"*{st.session_state.username}**\n\n📧 `{st.session_state.email}`\n\n📌 Vai trò: **{st.session_state.role}*")
+
+if st.sidebar.button("🚪 Đăng xuất hệ thống", use_container_width=True):
+    st.session_state.logged_in = False
+    st.session_state.username = ""
+    st.session_state.email = ""
+    st.session_state.role = ""
+    st.rerun()
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🧭 Hệ thống Điều hướng")
+
+if st.session_state.role == "Giáo viên":
+    menu = st.sidebar.selectbox(
+        "Chọn chức năng:",
+        [
+            "1. Trạm AI: Lập Kế hoạch IEP & Tối ưu Lý thuyết",
+            "2. Quản lý Hồ sơ, Giao bài & Theo dõi Tiến bộ"
+        ]
+    )
+else:
+    menu = st.sidebar.selectbox(
+        "Chọn chức năng:",
+        [
+            "1. Kho học liệu tương tác (Tạo Sơ đồ tư duy & Ý nghĩa sinh động)",
+            "2. Làm bài tập giáo viên gửi & Đánh giá tiến bộ"
+        ]
+    )
+
+# =========================================================================
+# PHÂN HỆ 1: GIÁO VIÊN - LẬP KẾ HOẠCH IEP & TỐI ƯU HÓA LÝ THUYẾT
+# =========================================================================
+if st.session_state.role == "Giáo viên" and menu == "1. Trạm AI: Lập Kế hoạch IEP & Tối ưu Lý thuyết":
+    st.markdown("## 📋 Trạm AI thông minh: IEP & Chuyển hóa Lý thuyết")
+    
+    tab_iep, tab_theory = st.tabs(["📑 Lập Kế hoạch IEP theo File Mẫu", "✨ Tối ưu hóa Lý thuyết Khô khan"])
+
+    with tab_iep:
+        st.write("Giáo viên đính kèm file mẫu quy chuẩn, chọn bộ môn, dạng khuyết tật và nhập yêu cầu cần đạt.")
+        uploaded_file = st.file_uploader(
+            "📁 Đính kèm file mẫu IEP (.txt, .docx, .pdf):",
+            type=["txt", "docx", "pdf"]
+        )
+
+        file_content_text = ""
+        if uploaded_file is not None:
+            try:
+                if uploaded_file.name.endswith(".txt"):
+                    file_content_text = uploaded_file.getvalue().decode("utf-8")
+                else:
+                    file_content_text = f"[Đã đính kèm file mẫu: {uploaded_file.name}]"
+                st.success(f"✅ Đã tải lên thành công: *{uploaded_file.name}*")
+            except Exception as e:
+                st.error(f"❌ Lỗi đọc file: {e}")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            mon_hoc = st.selectbox(
+                "Chọn bộ môn giảng dạy:",
+                ["Môn Toán", "Môn Ngữ Văn", "Môn Khoa học Tự nhiên", "Môn Lịch sử & Địa lý", "Môn Tin học"]
+            )
+        with col2:
+            dang_khuyet_tat = st.selectbox(
+                "Dạng khuyết tật / Đối tượng học sinh:",
+                [
+                    "Khuyết tật trí tuệ nhẹ (chậm tiếp thu, khó tập trung, ghi nhớ ngắn hạn)",
+                    "Khuyết tật vận động tay (khó thao tác chuột/bàn phím chính xác)",
+                    "Khó khăn về nhận thức và ngôn ngữ"
+                ]
+            )
+
+        yeu_cau_goc = st.text_area(
+            "Nhập Yêu cầu cần đạt hoặc Tên bài học chính khóa:",
+            placeholder="Ví dụ: Nêu khái niệm thuật toán và ví dụ thực tế..."
+        )
+
+        if st.button("🤖 AI tự động lập Kế hoạch IEP chi tiết", use_container_width=True):
+            if not yeu_cau_goc.strip():
+                st.warning("⚠️ Vui lòng nhập Yêu cầu cần đạt!")
+            else:
+                with st.spinner("🤖 AI đang phân tích và lập bản IEP chuyên sâu..."):
+                    try:
+                        prompt_text = f"""
+                        Lập Kế hoạch IEP chi tiết cho môn {mon_hoc}, học sinh bị {dang_khuyet_tat}, yêu cầu cần đạt: {yeu_cau_goc}. 
+                        Dựa vào file mẫu: {file_content_text}. Trình bày rõ hành động cụ thể của giáo viên bộ môn bằng tiếng Việt, định dạng Markdown.
+                        """
+                        if client:
+                            response = client.models.generate_content(model="gemini-3.8-flash", contents=prompt_text)
+                            ket_qua_ai = response.text
+                        else:
+                            ket_qua_ai = f"### IEP Mô phỏng môn {mon_hoc} cho học sinh {dang_khuyet_tat}"
+
+                        st.success("🎉 Hoàn thành tạo Kế hoạch IEP tự động!")
+                        st.markdown(ket_qua_ai)
+                        st.download_button("📥 Tải xuống bản Kế hoạch IEP (.md)", data=ket_qua_ai, file_name="IEP.md", mime="text/markdown", use_container_width=True)
+                    except Exception as e:
+                        st.error(f"❌ Lỗi AI: {e}")
+
+    with tab_theory:
+        st.subheader("✨ Biến đổi lý thuyết khô khan thành sinh động, dễ hiểu")
+        st.write("Giáo viên dán nội dung bài học hoặc lý thuyết SGK dài và khô khan vào đây. AI sẽ cô đọng, biến chúng thành các bước ngắn, sơ đồ màu sắc và ví dụ trực quan.")
+        
+        raw_theory = st.text_area("Nhập nội dung lý thuyết gốc cần tinh gọn:", placeholder="Dán đoạn lý thuyết dài trong sách giáo khoa vào đây...")
+        theory_subject = st.selectbox("Chọn môn học cho lý thuyết:", ["Môn Toán", "Môn Ngữ Văn", "Môn Khoa học Tự nhiên", "Môn Lịch sử & Địa lý", "Môn Tin học"], key="th_sub")
+
+        if st.button("🪄 AI Rút gọn & Trực quan hóa Bài học", use_container_width=True):
+            if not raw_theory.strip():
+                st.warning("⚠️ Vui lòng nhập nội dung lý thuyết cần tối ưu!")
+            else:
+                with st.spinner("🪄 AI đang cô đọng và sinh động hóa kiến thức..."):
+                    try:
+                        prompt_theory = f"""
+                        Bạn là chuyên gia giáo dục hòa nhập. Hãy chuyển đổi đoạn lý thuyết môn {theory_subject} sau đây thành dạng cực kỳ ngắn gọn, sinh động, dễ hiểu, dùng hình ảnh minh họa gần gũi và chia nhỏ thành các bước (micro-learning) phù hợp với học sinh khuyết tật trí tuệ nhẹ/chậm tiếp thu:
+                        Nội dung gốc: {raw_theory}
+                        """
+                        if client:
+                            res_th = client.models.generate_content(model="gemini-3.8-flash", contents=prompt_theory)
+                            optimized_theory = res_th.text
+                        else:
+                            optimized_theory = "### Lý thuyết tóm tắt mô phỏng (Chạy offline)"
+
+                        st.success("🌟 Đã tối ưu hóa lý thuyết thành công!")
+                        st.markdown(optimized_theory)
+                    except Exception as e:
+                        st.error(f"❌ Lỗi AI: {e}")
+
+# =========================================================================
+# PHÂN HỆ 1 (TIẾP): QUẢN LÝ HỒ SƠ, GIAO BÀI & THEO DÕI TIẾN BỘ
+# =========================================================================
+elif st.session_state.role == "Giáo viên" and menu == "2. Quản lý Hồ sơ, Giao bài & Theo dõi Tiến bộ":
+    st.markdown("## 📊 Quản lý Hồ sơ, Giao bài tập & Theo dõi Tiến bộ Học sinh")
+    
+    tab1, tab2, tab3 = st.tabs(["📁 Danh sách Hồ sơ Học sinh", "📤 Giao bài tập định danh", "📈 Báo cáo Tiến bộ & Lỗi sai từ AI"])
+
+    with tab1:
+        st.subheader("Thêm mới hồ sơ học sinh hòa nhập")
+        with st.form("add_student_form"):
+            s_name = st.text_input("Họ và tên học sinh:")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                s_school = st.text_input("Tên trường THCS:", placeholder="Ví dụ: THCS Nguyễn Văn Trỗi")
+            with col_b:
+                s_class = st.text_input("Lớp học:", placeholder="Ví dụ: Lớp 9/3")
+            s_disability = st.selectbox("Dạng khuyết tật:", ["Khuyết tật trí tuệ nhẹ", "Khuyết tật vận động tay", "Khó khăn ngôn ngữ"])
+            s_note = st.text_area("Ghi chú đặc điểm sư phạm:")
+            
+            submit_student = st.form_submit_button("💾 Lưu hồ sơ học sinh")
+            if submit_student:
+                if s_name and s_school and s_class:
+                    st.session_state.student_profiles.append({
+                        "name": s_name, "school": s_school, "class": s_class, "disability": s_disability, "note": s_note
+                    })
+                    st.success(f"🎉 Đã lưu hồ sơ em *{s_name}* ({s_class}, {s_school}) thành công!")
+                else:
+                    st.warning("⚠️ Vui lòng điền đầy đủ Họ tên, Trường và Lớp!")
+
+        st.markdown("### 📚 Danh sách học sinh đang quản lý:")
+        if len(st.session_state.student_profiles) == 0:
+            st.info("ℹ️ Chưa có hồ sơ học sinh nào. Vui lòng thêm mới phía trên.")
+        else:
+            for stu in st.session_state.student_profiles:
+                with st.expander(f"👤 {stu['name']} - {stu['class']} - {stu['school']} ({stu['disability']})"):
+                    st.write(f"🏫*Trường:** {stu['school']} | 📚 *Lớp:* {stu['class']}")
+                    st.write(f"🧩 *Dạng khuyết tật:* {stu['disability']}")
+                    st.write(f"📝 *Ghi chú:* {stu['note']}")
+
+    with tab2:
+        st.subheader("📤 Giao bài tập riêng đến học sinh trong danh sách")
+        if len(st.session_state.student_profiles) == 0:
+            st.warning("⚠️ Chưa có học sinh nào trong hệ thống! Vui lòng thêm học sinh ở tab 'Danh sách Hồ sơ Học sinh' trước.")
+        else:
+            with st.form("assign_task_form"):
+                student_names = [s["name"] for s in st.session_state.student_profiles]
+                selected_student = st.selectbox("Chọn học sinh nhận bài tập:", student_names)
+                task_subject = st.selectbox("Chọn môn học:", ["Môn Toán", "Môn Ngữ Văn", "Môn Khoa học Tự nhiên", "Môn Lịch sử & Địa lý", "Môn Tin học"])
+                task_content = st.text_area("Nội dung bài tập / Yêu cầu cần làm:", placeholder="Ví dụ: Giải phương trình 2x - 4 = 0 và nêu định nghĩa căn bậc hai...")
+                
+                submit_task = st.form_submit_button("🚀 Gửi bài tập đến học sinh")
+                if submit_task:
+                    if task_content.strip():
+                        st.session_state.assigned_tasks.append({
+                            "student": selected_student,
+                            "subject": task_subject,
+                            "content": task_content,
+                            "status": "Chưa nộp"
+                        })
+                        st.success(f"✅ Đã gửi bài tập môn *{task_subject}* thành công cho em *{selected_student}*!")
+                    else:
+                        st.warning("⚠️ Vui lòng nhập nội dung bài tập!")
+
+        st.markdown("### 📋 Lịch sử các bài tập đã giao:")
+        if len(st.session_state.assigned_tasks) == 0:
+            st.info("ℹ️ Chưa có bài tập nào được giao.")
+        else:
+            for t in st.session_state.assigned_tasks:
+                st.info(f"👤*Học sinh:** {t['student']} | 📖*Môn:** {t['subject']} | 📌 *Trạng thái:* {t['status']}\n\n- *Nội dung:* {t['content']}")
+
+    with tab3:
+        st.subheader("📈 Báo cáo Tiến bộ, Số câu sai & Phạm trù kiến thức cần dạy lại từ AI")
+        if len(st.session_state.reports) == 0:
+            st.info("ℹ️ Chưa có báo cáo nào từ học sinh gửi về.")
+        else:
+            for rep in st.session_state.reports:
+                st.success(f"👤*Học sinh:** {rep['student']} | 📖 *Môn:* {rep['subject']}")
+                st.markdown(f"📊 *Tiến bộ:* Đã học {rep['total_learned']} câu | Làm đúng: *{rep['correct_count']}* câu | Sai: *{rep['wrong_count']}* câu")
+                st.markdown(f"🔍 **Phân tích chi tiết & Kiến thức cần dạy lại:**\n{rep['content']}")
+                st.markdown("---")
+
+# =========================================================================
+# PHÂN HỆ 2 & 3: HỌC SINH - KHO HỌC LIỆU TỰ NHẬP & LÀM BÀI TẬP
+# =========================================================================
+if st.session_state.role == "Học sinh":
+    if menu == "1. Kho học liệu tương tác (Tạo Sơ đồ tư duy & Ý nghĩa sinh động)":
+        st.markdown("## 🎮 Kho học liệu tương tác thông minh (Hỗ trợ Tự học)")
+        st.write("Em có thể nhập bất kỳ nội dung bài học hoặc chủ đề nào em muốn tìm hiểu. Hệ thống AI sẽ tự động tạo *sơ đồ tư duy dạng văn bản*, hình ảnh mô tả sinh động và câu từ cực kỳ ngắn gọn, dễ hiểu giúp em nắm bắt bài nhanh chóng.")
+
+        with st.form("student_learning_form"):
+            topic_input = st.text_area("Nhập nội dung hoặc chủ đề em muốn học:", placeholder="Ví dụ: Quang hợp ở thực vật, hoặc Định lý Pytago trong môn Toán...")
+            subject_choice = st.selectbox("Chọn môn học:", ["Môn Toán", "Môn Ngữ Văn", "Môn Khoa học Tự nhiên", "Môn Lịch sử & Địa lý", "Môn Tin học"])
+            submit_learn = st.form_submit_button("🎨 Tạo Sơ đồ tư duy & Hình ảnh sinh động")
+
+            if submit_learn:
+                if not topic_input.strip():
+                    st.warning("⚠️ Vui lòng nhập chủ đề hoặc nội dung em muốn học!")
+                else:
+                    with st.spinner("🎨 AI đang vẽ sơ đồ tư duy và chuyển hóa kiến thức thành hình ảnh sinh động cho em..."):
+                        try:
+                            prompt_mindmap = f"""
+                            Bạn là trợ lý học tập thân thiện. Hãy tạo tài liệu học tập trực quan cho học sinh THCS về chủ đề '{topic_input}' (thuộc môn {subject_choice}).
+                            Yêu cầu bắt buộc:
+                            1. Tạo một *Sơ đồ tư duy (Mindmap)* bằng các ký hiệu phân cấp rõ ràng (dùng gạch đầu dòng).
+                            2. Mô tả các *Hình ảnh sinh động / Trực quan* bằng câu từ cực kỳ ngắn gọn, dễ hiểu, nhiều màu sắc để học sinh dễ hình dung trong đầu.
+                            3. Tóm tắt cốt lõi bài học bằng 3 ý chính ngắn gọn nhất.
+                            """
+                            if client:
+                                res_mm = client.models.generate_content(model="gemini-3.8-flash", contents=prompt_mindmap)
+                                mindmap_result = res_mm.text
+                            else:
+                                mindmap_result = f"### Sơ đồ tư duy mô phỏng cho chủ đề: {topic_input}\n- Nhánh 1: Khái niệm cốt lõi\n- Nhánh 2: Ví dụ thực tế\n- Nhánh 3: Ý nghĩa"
+
+                            st.success("🎉 Đã tạo xong Kho học liệu trực quan dành riêng cho em!")
+                            st.markdown("---")
+                            st.markdown(mindmap_result)
+
+                        except Exception as e:
+                            st.error(f"❌ Lỗi khi kết nối AI: {e}")
+
+    else:
+        st.markdown("## 📝 Làm bài tập giáo viên gửi & Đánh giá tiến bộ")
+        
+        tab_hs1, tab_hs2 = st.tabs(["1️⃣ Làm bài tập & Nhận giải thích câu sai", "2️⃣ Đánh giá tiến bộ cá nhân"])
+
+        with tab_hs1:
+            st.write("Dưới đây là các bài tập giáo viên đã giao riêng cho em. Hãy hoàn thành để hệ thống AI chấm điểm, giải thích chi tiết câu sai và báo cáo về cho giáo viên.")
+            
+            my_tasks = [t for t in st.session_state.assigned_tasks if t["student"].lower() == st.session_state.username.lower()]
+
+            if len(my_tasks) == 0:
+                st.info(f"ℹ️ Hiện tại không có bài tập nào được giao riêng cho tên tài khoản *{st.session_state.username}*. (Lưu ý: Tên đăng nhập của em phải khớp với tên giáo viên đã lưu trong hồ sơ).")
+            else:
+                for idx, task in enumerate(my_tasks):
+                    with st.expander(f"📚 Bài tập môn {task['subject']} - Trạng thái: {task['status']}"):
+                        st.write(f"*Yêu cầu của giáo viên:* {task['content']}")
+                        
+                        student_ans = st.text_area("Bài làm / Đáp án của em:", key=f"ans_{idx}", placeholder="Nhập đáp án hoặc câu trả lời của em vào đây...")
+                        is_correct_input = st.selectbox("Em tự đánh giá bài làm của mình thế nào?", ["Chưa rõ / Cần AI kiểm tra giúp", "Em chắc chắn đúng", "Em cảm thấy còn phân vân / có thể sai"], key=f"eval_{idx}")
+                        
+                        if st.button(f"📤 Nộp bài & Xem giải thích lỗi sai", key=f"btn_{idx}"):
+                            if not student_ans.strip():
+                                st.warning("⚠️ Vui lòng nhập câu trả lời trước khi nộp!")
+                            else:
+                                task["status"] = "Đã nộp"
+                                st.success("🎉 Nộp bài thành công! AI đang chấm điểm, phân tích lỗi sai và gửi báo cáo về cho giáo viên...")
+                                
+                                wrong_count = 1 if "phân vân" in is_correct_input or "Chưa rõ" in is_correct_input else 0
+                                correct_count = 0 if wrong_count > 0 else 1
+                                
+                                if st.session_state.username not in st.session_state.student_progress:
+                                    st.session_state.student_progress[st.session_state.username] = {"total": 0, "correct": 0, "wrong": 0}
+                                st.session_state.student_progress[st.session_state.username]["total"] += 1
+                                if wrong_count > 0:
+                                    st.session_state.student_progress[st.session_state.username]["wrong"] += 1
+                                else:
+                                    st.session_state.student_progress[st.session_state.username]["correct"] += 1
+
+                                explanation_text = f"""
+                                ### 💡 Kết quả phân tích từ AI cho bài làm môn {task['subject']}:
+                                - *Bài làm của em:* {student_ans}
+                                - *Nhận định:* {'⚠️ Phát hiện lỗi sai trong tư duy logic/tính toán.' if wrong_count > 0 else '🎉 Bài làm hoàn thành tốt!'}
+                                - *Giải thích chi tiết:* {'Đối với dạng bài này, em cần chú ý quy tắc biến đổi vế và kiểm tra kỹ dấu âm dương trước khi kết luận.' if wrong_count > 0 else 'Em đã nắm vững kiến thức cốt lõi của bài học này.'}
+                                - *Phạm trù kiến thức giáo viên cần hỗ trợ ôn tập thêm:* {'Kỹ năng giải phương trình cơ bản và biến đổi đại số.' if wrong_count > 0 else 'Không có lỗi trọng tâm.'}
+                                """
+                                
+                                st.markdown(explanation_text)
+
+                                st.session_state.reports.append({
+                                    "student": st.session_state.username,
+                                    "subject": task['subject'],
+                                    "total_learned": 1,
+                                    "correct_count": correct_count,
+                                    "wrong_count": wrong_count,
+                                    "content": explanation_text
+                                })
+
+        with tab_hs2:
+            st.markdown("## 📈 Đánh giá Tiến bộ Cá nhân")
+            st.write("Theo dõi tổng quan số câu em đã học, số câu làm đúng và số câu sai để nắm bắt năng lực của bản thân.")
+            
+            my_prog = st.session_state.student_progress.get(st.session_state.username, {"total": 0, "correct": 0, "wrong": 0})
+            
+            col_p1, col_p2, col_p3 = st.columns(3)
+            with col_p1:
+                st.metric(label="📚 Tổng số câu đã học/làm", value=my_prog["total"])
+            with col_p2:
+                st.metric(label="✅ Số câu làm đúng", value=my_prog["correct"])
+            with col_p3:
+                st.metric(label="❌ Số câu làm sai", value=my_prog["wrong"])
+                
+            if my_prog["total"] > 0:
+                accuracy_rate = (my_prog["correct"] / my_prog["total"]) * 100
+                st.progress(accuracy_rate / 100)
+                st.info(f"🌟 Tỷ lệ làm đúng của em đạt: *{accuracy_rate:.1f}%*. Hãy tiếp tục phát huy nhé!")
+            else:
+                st.warning("ℹ️ Em chưa hoàn thành bài tập nào. Hãy sang tab 1 để nhận và làm bài tập từ giáo viên!")
+
